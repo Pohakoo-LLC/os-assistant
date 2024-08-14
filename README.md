@@ -1,2 +1,1 @@
-# os assistant
- 
+# OS Assistant
