@@ -98,8 +98,11 @@ def confirm_and_execute_script(script: str) -> None:
 
     exec(script)
 
-if __name__ == "__main__":
-    user_request = input("What would you like the AI to do?\n")
-    steps = get_task_steps(user_request)
-    script = get_python_script_from_prompt(user_request, steps)
+def main(request: str) -> None:
+    steps = get_task_steps(request)
+    script = get_python_script_from_prompt(request, steps)
     confirm_and_execute_script(script)
+
+if __name__ == "__main__":
+    request = input("Enter the task you want to complete: ")
+    main(request)
