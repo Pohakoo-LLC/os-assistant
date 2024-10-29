@@ -1,14 +1,17 @@
 import json
 from openai import OpenAI
+import google.generativeai as genai
 
 def load_json(filepath: str) -> dict:
     """Load and return JSON data from a given file."""
     with open(filepath, 'r') as f:
         return json.load(f)
 
+keys = load_json("configs/keys.json")
+settings = load_json("configs/settings.json")
+
 def initialize_client() -> OpenAI:
     """Initialize and return the OpenAI client with the required API credentials."""
-    keys = load_json("configs/keys.json")
     return OpenAI(
         api_key=keys["api_key"],
         organization=keys["organization"],
@@ -16,19 +19,9 @@ def initialize_client() -> OpenAI:
     )
 
 client = initialize_client()
-settings = load_json("configs/settings.json")
 
-def generate_completion(user_text: str, system_text: str) -> str:
-    """
-    Generate a completion using OpenAI's chat completion API.
-    
-    Args:
-        user_text (str): The user-provided input text.
-        system_text (str): The system's initial guidance text.
-    
-    Returns:
-        str: The content of the AI's response.
-    """
+def generate_oai_completion(user_text: str, system_text: str) -> str:
+    """Generate a completion using OpenAI's chat completion API."""
     completion = client.chat.completions.create(
         model="gpt-3.5-turbo",
         messages=[
@@ -39,35 +32,45 @@ def generate_completion(user_text: str, system_text: str) -> str:
     )
     return completion.choices[0].message.content
 
-def get_task_steps(user_prompt: str) -> str:
+def generate_gemini_completion(prompt, system_prompt):
+    """Generate a completion using Gemini API."""
+    prompt = f"{system_prompt}\n{prompt}"
+    genai.configure(api_key=keys["gemini_api_key"])
+    model = genai.GenerativeModel("gemini-1.5-flash")
+    response = model.generate_content(prompt)
+    text = ""
+    for part in response.candidates[0].content.parts:
+        text += part.text
+    return text
+
+def generate_completion(user_text: str, system_text: str) -> str:
     """
-    Get a list of steps required to complete a task based on the user prompt.
+    Wrapper function to generate a completion based on the configured model.
     
     Args:
-        user_prompt (str): The prompt describing the task.
-
+        user_text (str): The user-provided input text.
+        system_text (str): The system's initial guidance text.
+    
     Returns:
-        str: Steps to complete the task.
+        str: The content of the AI's response.
     """
+    if settings.get("use_model") == "gemini":
+        return generate_gemini_completion(user_text, system_text)
+    else:
+        return generate_oai_completion(user_text, system_text)
+
+def get_task_steps(user_prompt: str) -> str:
+    """Get a list of steps required to complete a task based on the user prompt."""
     steps_prompt = f"""\
-List the steps required to complete the following task. The steps will be excecuted in code on the user's computer. Do not write any code. You can use the code to detect things if it wasn't specified in the prompt or something is unclear. There can be as many steps as needed. Be as detailed as possible to minimize failure. Complete the tasks as best as you can. If the task is unclear, print out a response and then exit.
+List the steps required to complete the following task. The steps will be executed in code on the user's computer. Do not write any code. You can use the code to detect things if it wasn't specified in the prompt or something is unclear. There can be as many steps as needed. Be as detailed as possible to minimize failure. Complete the tasks as best as you can. If the task is unclear, print out a response and then exit. Don't do anything risky or possibly destructive.
 USER: {user_prompt}"""
     
     system_text = "You are an assistant that breaks down tasks into clear, sequential steps."
-    steps_response = generate_completion(steps_prompt, system_text)
-    
-    return steps_response
+    return generate_completion(steps_prompt, system_text)
 
 def get_python_script_from_prompt(user_prompt: str, steps: str) -> str:
     """
     Generate a Python script based on the user prompt and the steps required to complete the task.
-
-    Args:
-        user_prompt (str): The prompt describing the desired Python script's functionality.
-        steps (str): The steps needed to complete the task as outlined by the AI.
-
-    Returns:
-        str: A Python script generated from the AI's response.
     """
     prompt = f"""\
 SYSTEM: The user will ask you to complete a task on their computer. Follow these steps to complete the task:
@@ -86,12 +89,7 @@ USER: {user_prompt}
     return script
 
 def confirm_and_execute_script(script: str) -> None:
-    """
-    Confirm with the user before executing the script and execute if confirmed.
-
-    Args:
-        script (str): The Python script to execute.
-    """
+    """Confirm with the user before executing the script and execute if confirmed."""
     if settings.get("confirm_before_run"):
         confirmation = input(f"{script}\n\n> Press Enter to confirm run. Type 'NO' and then press Enter to abort: ")
         if confirmation.strip().upper() == "NO":
@@ -103,6 +101,5 @@ def confirm_and_execute_script(script: str) -> None:
 if __name__ == "__main__":
     user_request = input("What would you like the AI to do?\n")
     steps = get_task_steps(user_request)
-    # print("Steps to complete the task:\n", steps)
     script = get_python_script_from_prompt(user_request, steps)
     confirm_and_execute_script(script)
